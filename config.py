@@ -1,6 +1,6 @@
 # =============================================================
 # config.py — Estrutura do prédio do SENAC e constantes gerais
-# US-01: Estrutura do prédio
+# US-01: Estrutura do prédio | US-13: Capacidade
 # =============================================================
 # Regra do projeto: NENHUM outro módulo usa números de andar
 # "soltos". Tudo referencia as constantes definidas aqui.
@@ -20,11 +20,26 @@ NOMES_ANDARES = {
 }
 
 # Posições iniciais dos elevadores
-# (iguais ao exemplo oficial do PDF da gincana: A no Térreo, B no 4º)
-POSICAO_INICIAL = {
-    "A": 0,
-    "B": 4,
-}
+# (iguais ao exemplo oficial do PDF: A no Térreo, B no 4º)
+POSICAO_INICIAL = {"A": 0, "B": 4}
 
-# Reservado para as próximas sprints
-CAPACIDADE_MAXIMA = 8  # pessoas por cabine (Sprint 3 — US-13)
+# US-13: limite de pessoas por cabine
+CAPACIDADE_MAXIMA = 8
+
+# Andar da catraca (entrada principal do prédio)
+ANDAR_CATRACA = 0
+
+# Andares válidos para SAÍDA do prédio (térreo e garagens)
+ANDARES_SAIDA = [0, -1, -2]
+
+# US-14/US-15: ordem de prioridade na fila (menor = mais prioritário)
+PRIORIDADES = {"pcd": 0, "vip": 1, "funcionario": 2, "comum": 3}
+
+# Ícone de cada perfil, para os logs
+ICONES_PERFIL = {"pcd": "♿", "vip": "⭐", "funcionario": "👔", "comum": "🧍"}
+
+# US-15: senha do modo VIP (professores/diretoria)
+SENHA_VIP = "senac123"
+
+# US-18: chance de evento aleatório por rodada no Modo Caos (0 a 1)
+CHANCE_EVENTO_CAOS = 0.35

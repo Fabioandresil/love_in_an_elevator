@@ -1,69 +1,102 @@
-# 🛗 Sistema Inteligente de Elevadores — SENAC (Sprints 1 e 2)
+# 🛗 Sistema Inteligente de Elevadores — SENAC (Versão Final)
 
-Projeto da Gincana Python — Lógica de Programação
-**Equipe:** Eric · Diogo (Scrum Master) · Fabio (Product Owner) · Yuri
+Projeto da Gincana Python — Lógica de Programação (Profª Maristela)
+**Equipe Scrum:** Eric (Dev) · Diogo (Scrum Master) · Fabio (Product Owner) · Yuri (Dev)
+
+## A ideia em uma frase
+
+Ao passar pela **catraca de identificação que já existe no SENAC**, o sistema
+reconhece a pessoa (perfil e andar da sala) e **antecipa a chamada do
+elevador**, agrupando quem chega junto por destino — o conceito de
+**Destination Dispatch** usado em prédios corporativos reais, adaptado à
+faculdade e implementado 100% em Python puro.
 
 ## Como executar
-
-Requisito: Python 3 (qualquer versão recente). Sem bibliotecas externas.
 
 ```
 python main.py
 ```
 
-No GitHub Codespaces: abra o terminal na pasta do projeto e rode o mesmo comando.
+Sem bibliotecas externas. Senha VIP da demonstração: `senac123` (config.py).
 
-## Módulos
+## Roteiro de demonstração sugerido (5 min)
+
+1. **[7]** Status inicial (A no Térreo, B no 4º — igual ao exemplo do PDF)
+2. **[1]** Entradas pela catraca: `1001`, `1002`, `1004`, `1005`, **`1003`
+   (Ana ♿ PCD)**, `1007`, `1008`, `1009`, `1011` — note que a chamada nasce
+   sozinha, com o andar da sala de cada um
+3. **[1]** `1006` (Profª Maristela ⭐ VIP) + senha `senac123` → viagem expressa
+4. **[1]** `9999` → visitante não cadastrado é orientado à chamada manual
+5. **[6]** Ver a fila (11 chamadas, EXPRESSO sinalizado)
+6. **[5]** Processar: na Rodada 1, **Ana embarca PRIMEIRO mesmo tendo chegado
+   em 5º** (prioridade PCD), cabine lota em **8/8**, paradas no 1º, 2º, 3º e
+   4º com desembarques anunciados; a VIP viaja expressa no outro elevador;
+   excedente vai para a Rodada 2
+7. **[9] + [4] + [5]** Ligar o Modo Caos e simular um grupo: panes e
+   manutenções aleatórias com redirecionamento automático
+8. **[8]** Relatório BI da sessão · **[0]** sair (exporta CSV)
+
+## Módulos (modularização = pontos extras de Organização)
 
 | Arquivo | Responsabilidade | User Stories |
 |---|---|---|
-| `config.py` | Estrutura do prédio (andares −2 a 4) e constantes | US-01 |
-| `validacao.py` | Leitura segura de entradas (texto, andares inválidos, origem=destino, quantidades) | US-02 |
-| `elevadores.py` | Estado das cabines (posição + status) e movimentação andar a andar | US-03 |
-| `chamadas.py` | Escolha com `abs()`, fila FIFO e processamento em rodadas paralelas | US-04, US-05, US-08, US-09 |
-| `interface.py` | Tudo que aparece no terminal (logs, menu, fila, status) | US-05, US-06 |
-| `main.py` | Loop principal — apenas orquestra (US-07: modularização) | US-06 |
+| `config.py` | Estrutura do prédio, capacidade, prioridades, constantes | US-01, US-13 |
+| `cadastro.py` | Usuários fictícios identificados pela catraca (LGPD by design) | US-10 |
+| `catraca.py` | Eventos de entrada/saída → chamada antecipada; senha VIP | US-11, US-15 |
+| `chamadas.py` | Fila com prioridades, despacho por destino, rodadas paralelas | US-04, US-08, US-09, US-12, US-13, US-14 |
+| `elevadores.py` | Estado das cabines e movimentação andar a andar (`abs()`) | US-03, US-05 |
+| `eventos.py` | Modo Caos com `random`: pane, conserto e redirecionamento | US-18 |
+| `ia_previsao.py` | IA simples: frequência de destinos + pré-posicionamento | US-20 |
+| `estatisticas.py` | Coleta de dados, relatório BI no terminal e exportação CSV | US-19, US-21 |
+| `validacao.py` | Toda entrada do usuário validada em laços `while` | US-02 |
+| `interface.py` | Painel de embarque, logs e menu (Regra 6) | US-05, US-06 |
+| `main.py` | Loop principal — apenas orquestra | US-06, US-07 |
 
-## Funcionalidades por sprint
+## Conceitos Python aplicados (premissa 5 do escopo)
 
-**Sprint 1 (✅):** chamada imediata com escolha do elevador mais próximo via
-`abs()`, movimentação andar a andar com log, validação total de entradas,
-menu em laço `while`.
+Variáveis e condicionais (`if/elif/else` em toda a lógica de decisão) ·
+Laços (`while` no menu, validações e rodadas; `for` na movimentação e
+agrupamento) · Funções (`def escolher_elevador()`, `def montar_viagem()`...) ·
+Listas e `abs()` (fila de chamadas, andares válidos, distâncias) ·
+Dicionários (elevadores, cadastro, memória da IA) · `random` (Modo Caos) ·
+**Modularização em 11 arquivos com responsabilidade única**.
 
-**Sprint 2 (✅):**
-- **Fila de chamadas (US-08):** lista FIFO — quem chega primeiro é atendido
-  primeiro. Comando do menu exibe a fila com a posição de cada pessoa.
-- **Modo lote (US-09):** registra até 20 chamadas de uma vez, simulando o
-  intervalo de aulas.
-- **Rodadas em paralelo lógico (US-09):** em cada rodada, cada elevador livre
-  assume UMA chamada; a chamada mais antiga fica com o elevador mais próximo.
-  O log anuncia a alocação ("Elevador A -> Maria") e quantos aguardam.
+## Decisões de projeto (para a banca)
 
-## Casos de teste oficiais (✅ verificados)
+- **Catraca como sensor:** o prédio já identifica quem entra; o módulo
+  `catraca.py` simula esses eventos com a MESMA interface que uma integração
+  real teria. Nenhum dado pessoal real é usado.
+- **Destination Dispatch:** agrupar por destino antes do embarque é a
+  tecnologia usada por Schindler (PORT) e TK Elevator em prédios corporativos
+  — aplicada aqui às 4 dores do cliente (demora, filas, escolhas estranhas,
+  caos no pico).
+- **Prioridade justa:** ordenação por perfil (PCD > VIP > funcionário >
+  comum) com desempate FIFO — o `sort` estável do Python preserva a ordem de
+  chegada dentro de cada prioridade.
+- **Capacidade 8/cabine:** excedente vai automaticamente para a próxima
+  viagem, com aviso — ninguém é esquecido.
+- **Desempate de distância alfabético** ("A" vence): previsível e testável.
+- **Modo Caos com trava de segurança:** se todos os elevadores quebrarem com
+  fila pendente, a manutenção de emergência religa um — o sistema nunca trava.
 
-**1. Exemplo do PDF:** A no Térreo, B no 4º; chamada do Subsolo 1 → Biblioteca.
-Distâncias A=1, B=5 → A escolhido; status final A no 3º.
+## Casos de teste verificados ✅
 
-**2. Lote do intervalo (5 usuários):**
-| Rodada | Elevador A | Elevador B |
-|---|---|---|
-| 1 | Maria (Térreo→3º, dist 0) | João (Térreo→2º, dist 4) |
-| 2 | Pedro (4º→Térreo, dist 1) | Ana (Subsolo 1→4º, dist 3) |
-| 3 | Lia (2º→Subsolo 2, **empate dist 2 → critério alfabético**) | — |
+1. **Exemplo oficial do PDF:** A no Térreo, B no 4º; chamada Subsolo 1 → 3º.
+   Distâncias A=1, B=5 → A escolhido.
+2. **Intervalo com 11 chamadas:** PCD chegou em 5º e embarcou em 1º; cabine
+   lotou em 8/8; VIP expressa em paralelo; excedente na Rodada 2; saída para
+   a garagem atendida.
+3. **Modo Caos (3 execuções):** panes e consertos aleatórios, fila sempre
+   100% atendida, sem travamentos.
+4. **Entradas inválidas:** texto, andar 7, origem=destino, matrícula
+   inexistente e senha VIP errada (3 tentativas → rebaixa para comum).
 
-## Decisões de projeto (para apresentar à banca)
+## Histórico Scrum
 
-- **FIFO + proximidade combinados:** a ordem de chegada define quem é atendido
-  na rodada (justiça na fila); a proximidade define QUAL elevador atende
-  (eficiência). Ataca as dores "Filas Eternas" e "Escolhas Estranhas".
-- **Desempate alfabético** (vence o "A"): comportamento previsível e testável —
-  demonstrado ao vivo no caso da Lia.
-- **1 chamada por elevador por rodada:** simplificação consciente; na Sprint 3
-  o agrupamento por destino permitirá vários passageiros por viagem.
-- **`main.py` sem lógica de negócio:** módulos com responsabilidade única
-  (pontos extras de Organização).
-
-## Próximas sprints (backlog)
-
-- Sprint 3: catraca inteligente, despacho por destino, capacidade (8/cabine), PCD/VIP/emergência, Modo Caos
-- Sprint 4: IA de previsão de demanda + relatório/dashboard BI
+- **Sprint 1:** núcleo de movimentação (US-01 a US-06)
+- **Sprint 2:** fila FIFO e rodadas paralelas (US-08, US-09)
+- **Sprint 3+4 (entrega final):** catraca, despacho por destino, capacidade,
+  PCD/VIP, Modo Caos, IA simples e BI (US-10 a US-15, US-18 a US-21)
+- **Roadmap (não entregue por decisão de escopo do PO):** horário de pico
+  (US-17), modo emergência (US-16), dashboard BI web (US-22) — o CSV
+  exportado já é a base de dados para essa evolução.

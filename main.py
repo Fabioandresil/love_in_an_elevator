@@ -1,41 +1,28 @@
 # =============================================================
 # main.py — Ponto de entrada do sistema (US-06: Loop principal)
-# Sprint 2: fila de chamadas (US-08) e modo lote (US-09)
 # =============================================================
-# Papel deste arquivo: APENAS orquestrar. Nenhuma lógica de
-# negócio mora aqui — ela está nos módulos especializados:
-#   config.py      -> estrutura do prédio
-#   elevadores.py  -> estado e movimentação
-#   chamadas.py    -> escolha, fila e ciclo das viagens
-#   validacao.py   -> entradas do usuário
-#   interface.py   -> exibição no terminal
+# Papel deste arquivo: APENAS orquestrar. A lógica de negócio
+# mora nos módulos especializados:
+#   config.py        -> estrutura do prédio e constantes
+#   cadastro.py      -> usuários identificados pela catraca
+#   catraca.py       -> eventos de entrada/saída (chamada antecipada)
+#   chamadas.py      -> fila, prioridades, despacho por destino
+#   elevadores.py    -> estado e movimentação das cabines
+#   eventos.py       -> Modo Caos (módulo random)
+#   ia_previsao.py   -> IA simples de demanda e pré-posicionamento
+#   estatisticas.py  -> coleta de dados e relatório BI
+#   validacao.py     -> entradas do usuário
+#   interface.py     -> exibição no terminal
 #
 # Para executar:  python main.py
+# Senha VIP da demonstração: senac123 (ver config.py)
 
 import elevadores as mod_elevadores
+import catraca
 import chamadas
-import validacao
+import estatisticas
 import interface
-
-
-def registrar_chamada_na_fila(fila):
-    """Lê os dados de uma chamada e a coloca na fila (US-08)."""
-    usuario, origem, destino = validacao.ler_dados_chamada()
-    chamada = chamadas.criar_chamada(usuario, origem, destino)
-    chamadas.adicionar_na_fila(fila, chamada)
-
-
-def modo_lote(fila):
-    """
-    Registra várias chamadas de uma vez (US-09), simulando um
-    cenário real de intervalo de aulas com vários usuários.
-    """
-    quantidade = validacao.ler_quantidade(
-        "   Quantas chamadas deseja registrar (1 a 20)? "
-    )
-    for numero in range(1, quantidade + 1):
-        print(f"\n   --- Chamada {numero} de {quantidade} ---")
-        registrar_chamada_na_fila(fila)
+import validacao
 
 
 def main():
@@ -43,47 +30,68 @@ def main():
 
     # Estado inicial: elevadores (A no Térreo, B no 4º) e fila vazia
     elevadores = mod_elevadores.criar_elevadores()
-    fila_chamadas = []  # US-08: lista de chamadas pendentes (FIFO)
+    fila_chamadas = []      # US-08: chamadas pendentes
+    caos_ativo = False      # US-18: Modo Caos desligado por padrão
     interface.exibir_status(elevadores)
 
     # Laço principal: mantém o sistema rodando até o operador sair
     while True:
-        interface.exibir_menu()
+        interface.exibir_menu(caos_ativo)
         opcao = validacao.ler_opcao_menu()
 
         if opcao == "1":
-            # Atendimento imediato (comportamento da Sprint 1)
-            usuario, origem, destino = validacao.ler_dados_chamada()
-            chamada = chamadas.criar_chamada(usuario, origem, destino)
-            chamadas.atender_chamada_imediata(chamada, elevadores)
+            # US-11: passagem pela catraca gera a chamada sozinha
+            matricula = validacao.ler_matricula()
+            catraca.entrada(matricula, fila_chamadas)
 
         elif opcao == "2":
-            registrar_chamada_na_fila(fila_chamadas)
+            matricula = validacao.ler_matricula()
+            andar_atual = validacao.ler_andar(
+                "   Em qual andar a pessoa está agora? "
+            )
+            destino = validacao.ler_andar_saida()
+            catraca.saida(matricula, andar_atual, destino, fila_chamadas)
 
         elif opcao == "3":
-            modo_lote(fila_chamadas)
+            # Visitante sem cadastro: chamada manual continua existindo
+            usuario, origem, destino = validacao.ler_dados_chamada()
+            chamada = chamadas.criar_chamada(usuario, origem, destino)
+            chamadas.adicionar_na_fila(fila_chamadas, chamada)
 
         elif opcao == "4":
-            chamadas.processar_fila(fila_chamadas, elevadores)
+            quantidade = validacao.ler_quantidade(
+                "   Quantas pessoas chegam pela catraca (1 a 15)? "
+            )
+            catraca.simular_grupo(quantidade, fila_chamadas)
 
         elif opcao == "5":
-            interface.exibir_fila(fila_chamadas)
+            chamadas.processar_fila(fila_chamadas, elevadores, caos_ativo)
 
         elif opcao == "6":
+            interface.exibir_fila(fila_chamadas)
+
+        elif opcao == "7":
             interface.exibir_status(elevadores)
+
+        elif opcao == "8":
+            estatisticas.exibir_relatorio(elevadores)
+
+        elif opcao == "9":
+            caos_ativo = not caos_ativo
+            estado = "LIGADO 🎲" if caos_ativo else "desligado"
+            print(f"   🎛️  Modo Caos agora está {estado}.")
 
         elif opcao == "0":
             if fila_chamadas:
                 interface.log_erro(
                     f"Atenção: {len(fila_chamadas)} chamada(s) ainda na fila."
                 )
-            interface.log_despedida()
+            caminho = estatisticas.exportar_csv()
+            interface.log_despedida(caminho)
             break  # encerra o laço principal
 
         else:
-            interface.log_erro(
-                f"Opção '{opcao}' inválida. Use 1 a 6 ou 0."
-            )
+            interface.log_erro(f"Opção '{opcao}' inválida. Use 1 a 9 ou 0.")
 
 
 # Executa main() apenas quando este arquivo é rodado diretamente
