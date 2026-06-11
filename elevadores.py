@@ -1,6 +1,7 @@
 # =============================================================
 # elevadores.py — Estado e movimentação das cabines
 # US-03: Estado dos elevadores | Regras 1, 3 e 4
+# Sprint 2: campo "status" (livre/ocupado) para a fila (US-08)
 # =============================================================
 
 from config import POSICAO_INICIAL
@@ -12,12 +13,14 @@ def criar_elevadores():
     Cria o estado inicial dos elevadores (Regra 1: o sistema
     conhece onde cada elevador está a qualquer momento).
     Estrutura: dicionário de dicionários, ex.:
-        {"A": {"andar_atual": 0}, "B": {"andar_atual": 4}}
-    Campos extras (ocupação, status) entram nas próximas sprints.
+        {"A": {"andar_atual": 0, "status": "livre"}, ...}
     """
     elevadores = {}
     for nome, andar in POSICAO_INICIAL.items():
-        elevadores[nome] = {"andar_atual": andar}
+        elevadores[nome] = {
+            "andar_atual": andar,
+            "status": "livre",   # livre | ocupado
+        }
     return elevadores
 
 

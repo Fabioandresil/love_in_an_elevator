@@ -1,10 +1,14 @@
 # =============================================================
 # validacao.py — Validação de todas as entradas do usuário
-# US-02: Validação de entradas | Regra 5: Validar Entradas
+# US-02 | Sprint 2: nome do usuário e quantidade do lote
+# Regra 5: Validar Entradas
 # =============================================================
 
 from config import ANDARES_VALIDOS
 import interface
+
+# Contador global para nomear usuários que não informam o nome
+_contador_usuarios = 0
 
 
 def ler_andar(mensagem):
@@ -39,15 +43,30 @@ def ler_andar(mensagem):
         return andar  # entrada válida: sai do laço
 
 
-def ler_chamada():
+def ler_nome_usuario():
     """
-    Lê origem e destino de uma chamada completa.
+    Lê o nome de quem está chamando o elevador (US-09: o log
+    identifica qual elevador atendeu qual usuário).
+    Se deixar em branco, gera um nome automático (Usuário 1, 2...).
+    """
+    global _contador_usuarios
+    nome = input("   Nome do usuário (Enter para automático): ").strip()
+    if nome == "":
+        _contador_usuarios += 1
+        nome = f"Usuário {_contador_usuarios}"
+    return nome
+
+
+def ler_dados_chamada():
+    """
+    Lê uma chamada completa: nome, origem e destino.
     Regra extra: origem igual ao destino não gera viagem.
-    Retorna a tupla (origem, destino).
+    Retorna a tupla (usuario, origem, destino).
     """
+    usuario = ler_nome_usuario()
     while True:
-        origem = ler_andar("   Em qual andar você está? ")
-        destino = ler_andar("   Para qual andar deseja ir? ")
+        origem = ler_andar(f"   Em qual andar {usuario} está? ")
+        destino = ler_andar(f"   Para qual andar {usuario} vai? ")
 
         if origem == destino:
             interface.log_erro(
@@ -55,7 +74,29 @@ def ler_chamada():
             )
             continue
 
-        return origem, destino
+        return usuario, origem, destino
+
+
+def ler_quantidade(mensagem, minimo=1, maximo=20):
+    """
+    Lê um número inteiro dentro de um intervalo (usado no modo
+    lote da US-09). Mesmo padrão de laço while da ler_andar.
+    """
+    while True:
+        resposta = input(mensagem).strip()
+        try:
+            quantidade = int(resposta)
+        except ValueError:
+            interface.log_erro(f"'{resposta}' não é um número inteiro.")
+            continue
+
+        if quantidade < minimo or quantidade > maximo:
+            interface.log_erro(
+                f"Informe um valor entre {minimo} e {maximo}."
+            )
+            continue
+
+        return quantidade
 
 
 def ler_opcao_menu():
