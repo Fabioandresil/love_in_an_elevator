@@ -1,26 +1,28 @@
 # =============================================================
 # app.py — Interface WEB do sistema (Flask) | Nível Hacker
-# v2: simulação ANIMADA das cabines subindo e descendo
+# v3: cabines animadas EM PARALELO + seleção por checkbox +
+#     Evento Crítico (30 entram / 25 saem) + regras do Modo Caos
 # =============================================================
-# Este arquivo é uma CAMADA DE INTERFACE: importa os mesmos
-# módulos de negócio do main.py (terminal) sem alterá-los.
-# Para a animação, o app registra cada movimentação feita pelo
-# módulo elevadores.py durante o processamento e a página
-# "reproduz o filme" no navegador, andar por andar.
-#
-# Como executar:
-#   pip install flask
-#   python app.py
-#   Abrir a porta 5000 (no Codespaces: aba PORTAS -> globo)
+# Camada de interface: importa os módulos de negócio do main.py
+# sem alterá-los. Novidades desta versão:
+#  - Checkbox no cadastro: várias pessoas passam pela catraca
+#    de uma só vez.
+#  - 🚨 EVENTO CRÍTICO: 30 pessoas entram ao mesmo tempo e, em
+#    seguida, 25 tentam sair — estresse máximo do sistema.
+#  - Animação simultânea: cada elevador tem sua própria trilha,
+#    A e B se movem AO MESMO TEMPO, com velocidade adaptativa.
+#  - MODO CAOS = protocolO de emergência: viagens expressas e
+#    prioridade VIP são SUSPENSAS (PCD continua prioritário).
 
 import io
+import random
 import contextlib
 
 from flask import Flask, request, redirect, url_for, render_template_string
 
 from config import (ANDARES_VALIDOS, NOMES_ANDARES, ANDAR_CATRACA,
                     ANDARES_SAIDA, SENHA_VIP, ICONES_PERFIL,
-                    CAPACIDADE_MAXIMA)
+                    CAPACIDADE_MAXIMA, PRIORIDADES)
 import cadastro
 import catraca
 import chamadas
@@ -30,7 +32,7 @@ import interface
 
 app = Flask(__name__)
 
-# ----- Estado da demonstração (um único prédio) ---------------
+# ----- Estado da demonstração ---------------------------------
 elevadores = mod_elevadores.criar_elevadores()
 fila_chamadas = []
 caos_ativo = False
@@ -38,9 +40,10 @@ ultimo_log = ("Sistema iniciado.\n"
               "🛗 Elevador A no Térreo | 🛗 Elevador B no 4º Andar.\n"
               "Use os controles ao lado para operar a catraca.")
 
+# Guarda a prioridade VIP original para restaurar ao sair do Caos
+VIP_RANK_ORIGINAL = PRIORIDADES["vip"]
+
 # ----- Gravador de movimentos para a animação -----------------
-# Envolve a função mover_elevador SEM alterar o módulo original:
-# toda vez que um elevador se move, anotamos (quem, de, para).
 movimentos_registrados = []
 _mover_original = mod_elevadores.mover_elevador
 
@@ -56,7 +59,6 @@ def _mover_com_registro(elevadores_, nome_elevador, andar_destino):
 
 mod_elevadores.mover_elevador = _mover_com_registro
 
-# Animação pendente para a próxima renderização da página
 animacao_pendente = None
 
 
@@ -68,7 +70,34 @@ def capturar_saida(funcao, *args, **kwargs):
     return buffer.getvalue()
 
 
-def entrada_web(matricula, senha):
+# ----- Regras do Modo Caos (protocolo de emergência) ----------
+
+def aplicar_regras_caos():
+    """
+    Em emergência, privilégios VIP são suspensos: viagens
+    expressas já na fila viram comuns e o perfil VIP perde a
+    prioridade (passa a valer como comum). A prioridade PCD é
+    MANTIDA — acessibilidade não se suspende.
+    """
+    PRIORIDADES["vip"] = PRIORIDADES["comum"]
+    suspensos = 0
+    for chamada in fila_chamadas:
+        if chamada["expresso"]:
+            chamada["expresso"] = False
+            suspensos += 1
+            print(f"   ⚠️  Viagem expressa de {chamada['usuario']} "
+                  f"SUSPENSA (protocolo de emergência).")
+    if suspensos == 0:
+        print("   ⚠️  Privilégios VIP suspensos enquanto o Modo Caos "
+              "estiver ativo (prioridade PCD mantida).")
+
+
+def restaurar_regras_normais():
+    PRIORIDADES["vip"] = VIP_RANK_ORIGINAL
+    print("   ✅ Operação normal restabelecida: privilégios VIP reativados.")
+
+
+def entrada_web(matricula, senha, vip_automatico=False):
     """Adaptador web do evento de catraca (senha vem do formulário)."""
     usuario = cadastro.buscar(matricula)
     if usuario is None:
@@ -77,7 +106,14 @@ def entrada_web(matricula, senha):
 
     expresso = False
     if usuario["perfil"] == "vip":
-        if senha == SENHA_VIP:
+        if caos_ativo:
+            print(f"   ⚠️  Modo Caos ativo: privilégio VIP de "
+                  f"{usuario['nome']} suspenso — atendimento comum.")
+        elif vip_automatico:
+            print(f"   ⭐ Senha VIP de {usuario['nome']} validada "
+                  f"automaticamente (modo lote).")
+            expresso = True
+        elif senha == SENHA_VIP:
             print(f"   ✅ Senha VIP de {usuario['nome']} correta — "
                   f"viagem EXPRESSA liberada!")
             expresso = True
@@ -96,6 +132,42 @@ def entrada_web(matricula, senha):
     chamadas.adicionar_na_fila(fila_chamadas, chamada)
 
 
+# ----- Geradores do Evento Crítico ----------------------------
+
+def gerar_entradas_criticas():
+    """Fase 1: 30 pessoas entram ao mesmo tempo pela catraca."""
+    print("👥 PICO DE ENTRADA: 30 pessoas passando pela catraca "
+          "simultaneamente!")
+    # Os 15 usuários cadastrados...
+    for matricula in cadastro.listar_matriculas():
+        entrada_web(matricula, senha="", vip_automatico=True)
+    # ...mais 15 alunos gerados na hora (dados fictícios)
+    for numero in range(1, 16):
+        perfil = "pcd" if random.random() < 0.07 else "comum"
+        chamada = chamadas.criar_chamada(
+            usuario=f"Aluno {numero}",
+            origem=ANDAR_CATRACA,
+            destino=random.choice([1, 2, 3, 4]),
+            perfil=perfil,
+        )
+        chamadas.adicionar_na_fila(fila_chamadas, chamada)
+
+
+def gerar_saidas_criticas():
+    """Fase 2: 25 pessoas tentam sair do prédio ao mesmo tempo."""
+    print("🏃 PICO DE SAÍDA: 25 pessoas chamando o elevador para "
+          "deixar o prédio!")
+    nomes_pool = ([u["nome"] for u in cadastro.USUARIOS.values()] +
+                  [f"Aluno {n}" for n in range(1, 16)])
+    for pessoa in random.sample(nomes_pool, k=25):
+        chamada = chamadas.criar_chamada(
+            usuario=pessoa,
+            origem=random.choice([1, 2, 3, 4]),
+            destino=random.choice([0, 0, 0, -1, -2]),
+        )
+        chamadas.adicionar_na_fila(fila_chamadas, chamada)
+
+
 # =============================================================
 # Página principal
 # =============================================================
@@ -108,7 +180,7 @@ PAGINA = """
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>🛗 Elevadores Inteligentes — SENAC</title>
 <style>
-  :root { --laranja:#F58220; --escuro:#2b2b2b; }
+  :root { --laranja:#F58220; --escuro:#2b2b2b; --vermelho:#c0392b; }
   * { box-sizing:border-box; }
   body { font-family:Segoe UI, Arial, sans-serif; margin:0;
          background:#f4f4f4; color:#333; }
@@ -130,7 +202,7 @@ PAGINA = """
   .andar-row { display:flex; align-items:stretch; height:44px;
                border-bottom:1px dashed #e8e8e8; transition:background .3s; }
   .andar-row:last-child { border-bottom:none; }
-  .andar-row.ativo { background:#fff3e6; }
+  .andar-row.ativo-A, .andar-row.ativo-B { background:#fff3e6; }
   .andar-nome { flex:1; font-size:.8rem; display:flex;
                 align-items:center; padding-left:8px; }
   .poco { width:58px; border-left:1px solid #f0e2d2;
@@ -144,27 +216,31 @@ PAGINA = """
             box-shadow:0 2px 6px rgba(0,0,0,.35); font-size:.95rem;
             transition: top .38s linear, left .38s linear; z-index:5; }
   .cabine small { font-size:.6rem; margin-left:2px; }
-  .cabine.sem-anim { transition:none; }
-  #anim-status { font-size:.85rem; margin:8px 0 0; min-height:1.3em;
+  .cabine.sem-anim { transition:none !important; }
+  .status-anim { font-size:.82rem; margin:6px 0 0; min-height:1.2em;
                  color:#a35a00; font-weight:600; }
 
   form { margin:0 0 10px; }
   label { font-size:.8rem; display:block; margin:6px 0 2px; }
   input, select { width:100%; padding:6px; border:1px solid #ccc;
                   border-radius:6px; font-size:.9rem; }
+  input[type=checkbox] { width:auto; }
   button { margin-top:8px; background:var(--laranja); color:#fff;
            border:none; padding:8px 14px; border-radius:6px;
            cursor:pointer; font-weight:bold; width:100%; }
   button:hover { filter:brightness(.92); }
   button.cinza { background:#666; }
+  button.critico { background:var(--vermelho); font-size:.95rem; }
   .linha { display:flex; gap:8px; }
   .linha > div { flex:1; }
   pre.log { grid-column:1 / -1; background:var(--escuro); color:#9fe89f;
             padding:14px; border-radius:10px; font-size:.8rem;
             white-space:pre-wrap; max-height:420px; overflow:auto; }
+  .fila { max-height:180px; overflow:auto; padding-left:22px; }
   .fila li { font-size:.85rem; margin-bottom:3px; }
   .badge { background:var(--laranja); color:#fff; border-radius:10px;
            padding:1px 8px; font-size:.75rem; }
+  .badge-caos { background:var(--vermelho); }
   footer { text-align:center; font-size:.75rem; color:#888;
            padding:10px 0 20px; }
 </style>
@@ -173,7 +249,7 @@ PAGINA = """
 <header>
   <h1>🛗 Sistema Inteligente de Elevadores — SENAC</h1>
   <p>Catraca integrada · Despacho por Destino · Capacidade {{capacidade}}/cabine ·
-     Modo Caos: <strong>{{ 'LIGADO 🎲' if caos else 'desligado' }}</strong></p>
+     Modo Caos: <strong>{{ 'LIGADO 🎲 (privilégios VIP suspensos)' if caos else 'desligado' }}</strong></p>
 </header>
 <main>
 
@@ -196,7 +272,8 @@ PAGINA = """
       <div class="cabine sem-anim" id="cab-A">🛗<small>A</small></div>
       <div class="cabine sem-anim" id="cab-B">🛗<small>B</small></div>
     </div>
-    <p id="anim-status"></p>
+    <p class="status-anim" id="status-A"></p>
+    <p class="status-anim" id="status-B"></p>
 
     <h2 style="margin-top:14px">📋 Fila de chamadas
         <span class="badge">{{ fila|length }}</span></h2>
@@ -210,19 +287,25 @@ PAGINA = """
     </ol>
     {% else %}<p style="font-size:.85rem">Fila vazia.</p>{% endif %}
 
-    <h2 style="margin-top:14px">🎫 Cadastro (cole uma matrícula na catraca)</h2>
-    <table>
-      <tr><th>Matr.</th><th>Nome</th><th>Perfil</th><th>Sala</th></tr>
-      {% for m, u in usuarios.items() %}
-      <tr><td>{{ m }}</td><td>{{ icones[u.perfil] }} {{ u.nome }}</td>
-          <td>{{ u.perfil }}</td><td>{{ nomes[u.andar_sala] }}</td></tr>
-      {% endfor %}
-    </table>
+    <h2 style="margin-top:14px">🎫 Cadastro — marque e envie em grupo</h2>
+    <form method="post" action="{{ url_for('rota_lote') }}">
+      <table>
+        <tr><th></th><th>Matr.</th><th>Nome</th><th>Perfil</th><th>Sala</th></tr>
+        {% for m, u in usuarios.items() %}
+        <tr>
+          <td><input type="checkbox" name="matriculas" value="{{ m }}"></td>
+          <td>{{ m }}</td><td>{{ icones[u.perfil] }} {{ u.nome }}</td>
+          <td>{{ u.perfil }}</td><td>{{ nomes[u.andar_sala] }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      <button>🎫 Passar selecionados pela catraca</button>
+    </form>
   </section>
 
   <!-- COLUNA DIREITA: controles -->
   <section class="card">
-    <h2>🎫 Catraca — Entrada</h2>
+    <h2>🎫 Catraca — Entrada individual</h2>
     <form method="post" action="{{ url_for('rota_entrada') }}">
       <div class="linha">
         <div><label>Matrícula</label>
@@ -276,6 +359,10 @@ PAGINA = """
     <form method="post" action="{{ url_for('rota_processar') }}">
       <button>▶️ PROCESSAR EMBARQUES (despacho por destino)</button>
     </form>
+    <form method="post" action="{{ url_for('rota_evento') }}">
+      <button class="critico">🚨 EVENTO CRÍTICO: 30 entram + 25 saem
+              (elevadores em ação simultânea)</button>
+    </form>
     <div class="linha">
       <form method="post" action="{{ url_for('rota_caos') }}" style="flex:1">
         <button class="cinza">🎲 Modo Caos: {{ 'desligar' if caos else 'ligar' }}</button>
@@ -296,12 +383,9 @@ PAGINA = """
         Mesma lógica do terminal, nova interface (modularização em ação)</footer>
 
 <script>
-  // Dados vindos do servidor
   const NOMES = {{ nomes_js | tojson }};
-  const POSICOES = {{ posicoes_js | tojson }};   // posição atual {A: andar, B: andar}
-  const ANIM = {{ anim | tojson }};              // null ou {inicio:{...}, movimentos:[...]}
-
-  const status = document.getElementById('anim-status');
+  const POSICOES = {{ posicoes_js | tojson }};
+  const ANIM = {{ anim | tojson }};
 
   function setCabine(elev, andar, instantaneo) {
     const cab = document.getElementById('cab-' + elev);
@@ -311,52 +395,73 @@ PAGINA = """
     cab.style.top = (celula.offsetTop + 3) + 'px';
     cab.style.left = (celula.offsetLeft + 5) + 'px';
     if (instantaneo) {
-      void cab.offsetHeight;             // força o navegador a aplicar já
+      void cab.offsetHeight;
       cab.classList.remove('sem-anim');
     }
   }
 
-  function destacarAndar(andar, ligado) {
+  function destacarAndar(elev, andar, ligado) {
     const row = document.getElementById('row-' + andar);
-    if (row) row.classList.toggle('ativo', ligado);
+    if (row) row.classList.toggle('ativo-' + elev, ligado);
   }
 
   const pausa = (ms) => new Promise(r => setTimeout(r, ms));
 
-  async function reproduzirAnimacao() {
-    // Cabines começam onde estavam ANTES do processamento
-    for (const elev in ANIM.inicio) setCabine(elev, ANIM.inicio[elev], true);
-    await pausa(500);
-
-    for (const mv of ANIM.movimentos) {
+  // Toca a trilha de UM elevador (A e B rodam em paralelo)
+  async function tocarTrilha(elev, movimentos, ms) {
+    const status = document.getElementById('status-' + elev);
+    for (const mv of movimentos) {
       const passo = mv.para > mv.de ? 1 : -1;
       const verbo = passo > 0 ? '⬆️ subindo' : '⬇️ descendo';
-      status.textContent = `🛗 Elevador ${mv.elevador} ${verbo}: ` +
+      status.textContent = `🛗 ${elev} ${verbo}: ` +
                            `${NOMES[mv.de]} → ${NOMES[mv.para]}`;
       let anterior = mv.de;
       for (let andar = mv.de + passo; ; andar += passo) {
-        destacarAndar(anterior, false);
-        destacarAndar(andar, true);
-        setCabine(mv.elevador, andar, false);
-        await pausa(420);
+        destacarAndar(elev, anterior, false);
+        destacarAndar(elev, andar, true);
+        setCabine(elev, andar, false);
+        await pausa(ms);
         anterior = andar;
         if (andar === mv.para) break;
       }
-      destacarAndar(anterior, false);
-      await pausa(300);   // portas abrindo/fechando
+      destacarAndar(elev, anterior, false);
+      await pausa(Math.min(300, ms));   // portas abrindo/fechando
     }
-    status.textContent = '✅ Movimentação concluída — confira o log abaixo.';
+    if (movimentos.length > 0)
+      status.textContent = `✅ Elevador ${elev}: movimentação concluída.`;
+  }
+
+  async function reproduzirAnimacao() {
+    // Cabines começam onde estavam ANTES do processamento
+    for (const elev in ANIM.inicio) setCabine(elev, ANIM.inicio[elev], true);
+
+    // Separa os movimentos por elevador (trilhas independentes)
+    const trilhas = { A: [], B: [] };
+    let passosTotais = 0;
+    for (const mv of ANIM.movimentos) {
+      trilhas[mv.elevador].push(mv);
+      passosTotais += Math.abs(mv.para - mv.de);
+    }
+    // Velocidade adaptativa: muito movimento -> filme mais rápido
+    const ms = passosTotais > 60 ? 150 : passosTotais > 30 ? 250 : 420;
+    document.querySelectorAll('.cabine').forEach(c =>
+      c.style.transitionDuration = (ms / 1000) + 's');
+
+    await pausa(500);
+    // AS DUAS CABINES SE MOVEM AO MESMO TEMPO:
+    await Promise.all([
+      tocarTrilha('A', trilhas.A, ms),
+      tocarTrilha('B', trilhas.B, ms),
+    ]);
   }
 
   window.addEventListener('load', () => {
     if (ANIM && ANIM.movimentos && ANIM.movimentos.length > 0) {
       reproduzirAnimacao();
     } else {
-      // Sem animação pendente: cabines na posição atual
       for (const elev in POSICOES) setCabine(elev, POSICOES[elev], true);
     }
   });
-  // Reposiciona corretamente se a janela mudar de tamanho
   window.addEventListener('resize', () => {
     if (!ANIM) for (const elev in POSICOES) setCabine(elev, POSICOES[elev], true);
   });
@@ -374,7 +479,7 @@ def pagina_inicial():
 
     return render_template_string(
         PAGINA,
-        andares=sorted(ANDARES_VALIDOS, reverse=True),  # 4º no topo
+        andares=sorted(ANDARES_VALIDOS, reverse=True),
         nomes=NOMES_ANDARES,
         nomes_js={str(a): NOMES_ANDARES[a] for a in ANDARES_VALIDOS},
         posicoes_js={n: e["andar_atual"] for n, e in elevadores.items()},
@@ -395,6 +500,25 @@ def rota_entrada():
     matricula = request.form.get("matricula", "").strip()
     senha = request.form.get("senha", "").strip()
     ultimo_log = capturar_saida(entrada_web, matricula, senha)
+    return redirect(url_for("pagina_inicial"))
+
+
+@app.route("/catraca/lote", methods=["POST"])
+def rota_lote():
+    """Checkboxes do cadastro: várias pessoas entram de uma vez."""
+    global ultimo_log
+    matriculas = request.form.getlist("matriculas")
+    if not matriculas:
+        ultimo_log = "❌ Nenhuma pessoa selecionada — marque as caixinhas no cadastro."
+        return redirect(url_for("pagina_inicial"))
+
+    def _lote():
+        print(f"👥 GRUPO NA CATRACA: {len(matriculas)} pessoa(s) "
+              f"entrando ao mesmo tempo!")
+        for matricula in matriculas:
+            entrada_web(matricula, senha="", vip_automatico=True)
+
+    ultimo_log = capturar_saida(_lote)
     return redirect(url_for("pagina_inicial"))
 
 
@@ -442,13 +566,60 @@ def rota_simular():
 @app.route("/processar", methods=["POST"])
 def rota_processar():
     global ultimo_log, animacao_pendente
-    # Fotografa onde as cabines estão ANTES e zera o gravador
     posicoes_iniciais = {n: e["andar_atual"] for n, e in elevadores.items()}
     movimentos_registrados.clear()
 
-    ultimo_log = capturar_saida(
-        chamadas.processar_fila, fila_chamadas, elevadores, caos_ativo
-    )
+    def _processar():
+        if caos_ativo:
+            aplicar_regras_caos()
+        chamadas.processar_fila(fila_chamadas, elevadores, caos_ativo)
+
+    ultimo_log = capturar_saida(_processar)
+
+    if movimentos_registrados:
+        animacao_pendente = {
+            "inicio": posicoes_iniciais,
+            "movimentos": list(movimentos_registrados),
+        }
+    return redirect(url_for("pagina_inicial"))
+
+
+@app.route("/evento-critico", methods=["POST"])
+def rota_evento():
+    """
+    🚨 Estresse máximo: 30 pessoas entram ao mesmo tempo e, na
+    sequência, 25 tentam sair. Roda sob protocolo de emergência
+    (regras do Modo Caos: VIP suspenso, panes possíveis) e gera
+    uma única animação com os DOIS elevadores trabalhando juntos.
+    """
+    global ultimo_log, animacao_pendente, caos_ativo
+    posicoes_iniciais = {n: e["andar_atual"] for n, e in elevadores.items()}
+    movimentos_registrados.clear()
+    caos_estava_ligado = caos_ativo
+    caos_ativo = True  # o evento crítico SEMPRE roda em protocolo de emergência
+
+    def _evento():
+        print("=" * 52)
+        print("🚨 EVENTO CRÍTICO — PROTOCOLO DE EMERGÊNCIA ATIVADO")
+        print("=" * 52)
+        aplicar_regras_caos()
+        print()
+        print("───── FASE 1: PICO DE ENTRADA ─────")
+        gerar_entradas_criticas()
+        chamadas.processar_fila(fila_chamadas, elevadores, caos_ativo=True)
+        print()
+        print("───── FASE 2: PICO DE SAÍDA ─────")
+        gerar_saidas_criticas()
+        chamadas.processar_fila(fila_chamadas, elevadores, caos_ativo=True)
+        print()
+        print("🏁 EVENTO CRÍTICO ENCERRADO — prédio esvaziado com sucesso.")
+
+    ultimo_log = capturar_saida(_evento)
+
+    # Restaura o estado do Modo Caos como estava antes do evento
+    caos_ativo = caos_estava_ligado
+    if not caos_ativo:
+        ultimo_log += "\n" + capturar_saida(restaurar_regras_normais)
 
     if movimentos_registrados:
         animacao_pendente = {
@@ -462,8 +633,12 @@ def rota_processar():
 def rota_caos():
     global caos_ativo, ultimo_log
     caos_ativo = not caos_ativo
-    ultimo_log = (f"🎛️ Modo Caos agora está "
-                  f"{'LIGADO 🎲 — imprevistos podem ocorrer!' if caos_ativo else 'desligado.'}")
+    if caos_ativo:
+        ultimo_log = ("🎛️ Modo Caos LIGADO 🎲 — protocolo de emergência:\n"
+                      + capturar_saida(aplicar_regras_caos))
+    else:
+        ultimo_log = ("🎛️ Modo Caos desligado.\n"
+                      + capturar_saida(restaurar_regras_normais))
     return redirect(url_for("pagina_inicial"))
 
 
@@ -479,13 +654,13 @@ def rota_reiniciar():
     """Volta ao estado inicial — útil para ensaiar a demo várias vezes."""
     global elevadores, fila_chamadas, caos_ativo, ultimo_log, animacao_pendente
     elevadores = mod_elevadores.criar_elevadores()
-    fila_chamadas = []
+    fila_chamadas.clear()
     caos_ativo = False
+    PRIORIDADES["vip"] = VIP_RANK_ORIGINAL
     animacao_pendente = None
     ultimo_log = "🔄 Demo reiniciada. Elevador A no Térreo, B no 4º andar."
     return redirect(url_for("pagina_inicial"))
 
 
 if __name__ == "__main__":
-    # host 0.0.0.0 permite o encaminhamento de porta do Codespaces
     app.run(host="0.0.0.0", port=5000, debug=False)
