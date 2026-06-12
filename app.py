@@ -1,17 +1,17 @@
 # =============================================================
 # app.py — Interface WEB do sistema (Flask) | Nível Hacker
+# v2: simulação ANIMADA das cabines subindo e descendo
 # =============================================================
-# Este arquivo é uma NOVA CAMADA DE INTERFACE: ele importa os
-# MESMOS módulos de negócio usados pelo main.py (terminal) sem
-# alterar uma linha deles — demonstração prática do valor da
-# modularização. Os logs do terminal são capturados e exibidos
-# num painel "central de operações" na página.
+# Este arquivo é uma CAMADA DE INTERFACE: importa os mesmos
+# módulos de negócio do main.py (terminal) sem alterá-los.
+# Para a animação, o app registra cada movimentação feita pelo
+# módulo elevadores.py durante o processamento e a página
+# "reproduz o filme" no navegador, andar por andar.
 #
 # Como executar:
 #   pip install flask
 #   python app.py
-#   Abrir http://localhost:5000 (no Codespaces, a porta 5000 é
-#   encaminhada automaticamente — clique no aviso que aparece)
+#   Abrir a porta 5000 (no Codespaces: aba PORTAS -> globo)
 
 import io
 import contextlib
@@ -38,13 +38,30 @@ ultimo_log = ("Sistema iniciado.\n"
               "🛗 Elevador A no Térreo | 🛗 Elevador B no 4º Andar.\n"
               "Use os controles ao lado para operar a catraca.")
 
+# ----- Gravador de movimentos para a animação -----------------
+# Envolve a função mover_elevador SEM alterar o módulo original:
+# toda vez que um elevador se move, anotamos (quem, de, para).
+movimentos_registrados = []
+_mover_original = mod_elevadores.mover_elevador
+
+
+def _mover_com_registro(elevadores_, nome_elevador, andar_destino):
+    andar_de = elevadores_[nome_elevador]["andar_atual"]
+    _mover_original(elevadores_, nome_elevador, andar_destino)
+    if andar_de != andar_destino:
+        movimentos_registrados.append(
+            {"elevador": nome_elevador, "de": andar_de, "para": andar_destino}
+        )
+
+
+mod_elevadores.mover_elevador = _mover_com_registro
+
+# Animação pendente para a próxima renderização da página
+animacao_pendente = None
+
 
 def capturar_saida(funcao, *args, **kwargs):
-    """
-    Executa uma função dos módulos existentes redirecionando os
-    print() para uma string — assim os logs do terminal viram o
-    painel de operações da página, sem refatorar nada.
-    """
+    """Redireciona os print() dos módulos para o painel da página."""
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         funcao(*args, **kwargs)
@@ -52,11 +69,7 @@ def capturar_saida(funcao, *args, **kwargs):
 
 
 def entrada_web(matricula, senha):
-    """
-    Adaptador web do evento de catraca: mesma lógica do
-    catraca.entrada, mas a senha VIP vem do formulário em vez
-    do input() do terminal.
-    """
+    """Adaptador web do evento de catraca (senha vem do formulário)."""
     usuario = cadastro.buscar(matricula)
     if usuario is None:
         interface.log_visitante(matricula)
@@ -110,8 +123,31 @@ PAGINA = """
              border-bottom:2px solid var(--laranja); padding-bottom:6px; }
   table { width:100%; border-collapse:collapse; font-size:.85rem; }
   td, th { padding:5px 6px; border-bottom:1px solid #eee; text-align:left; }
-  .andar-elev { font-weight:bold; }
-  .ocupado-A { background:#fff3e6; }
+
+  /* ---------- PRÉDIO ANIMADO ---------- */
+  .predio { position:relative; border:1px solid #e3e3e3;
+            border-radius:8px; overflow:hidden; }
+  .andar-row { display:flex; align-items:stretch; height:44px;
+               border-bottom:1px dashed #e8e8e8; transition:background .3s; }
+  .andar-row:last-child { border-bottom:none; }
+  .andar-row.ativo { background:#fff3e6; }
+  .andar-nome { flex:1; font-size:.8rem; display:flex;
+                align-items:center; padding-left:8px; }
+  .poco { width:58px; border-left:1px solid #f0e2d2;
+          background:repeating-linear-gradient(0deg,#fafafa,#fafafa 6px,
+                     #f3f3f3 6px,#f3f3f3 12px); }
+  .poco-cab { display:flex; align-items:center; justify-content:center;
+              font-size:.7rem; color:#bbb; }
+  .cabine { position:absolute; width:48px; height:38px; border-radius:6px;
+            background:var(--laranja); color:#fff; font-weight:bold;
+            display:flex; align-items:center; justify-content:center;
+            box-shadow:0 2px 6px rgba(0,0,0,.35); font-size:.95rem;
+            transition: top .38s linear, left .38s linear; z-index:5; }
+  .cabine small { font-size:.6rem; margin-left:2px; }
+  .cabine.sem-anim { transition:none; }
+  #anim-status { font-size:.85rem; margin:8px 0 0; min-height:1.3em;
+                 color:#a35a00; font-weight:600; }
+
   form { margin:0 0 10px; }
   label { font-size:.8rem; display:block; margin:6px 0 2px; }
   input, select { width:100%; padding:6px; border:1px solid #ccc;
@@ -141,21 +177,26 @@ PAGINA = """
 </header>
 <main>
 
-  <!-- COLUNA ESQUERDA: prédio, fila e cadastro -->
+  <!-- COLUNA ESQUERDA: prédio animado, fila e cadastro -->
   <section class="card">
     <h2>🏢 O Prédio agora</h2>
-    <table>
+    <div class="predio" id="predio">
+      <div class="andar-row" style="height:20px;border-bottom:1px solid #eee">
+        <div class="andar-nome"></div>
+        <div class="poco poco-cab">A</div>
+        <div class="poco poco-cab">B</div>
+      </div>
       {% for andar in andares %}
-      <tr {% if posicoes[andar] %}class="ocupado-A"{% endif %}>
-        <td style="width:55%">{{ nomes[andar] }}</td>
-        <td class="andar-elev">
-          {% for elev in posicoes[andar] %}
-            🛗 {{ elev.nome }} <small>({{ elev.status }})</small>
-          {% endfor %}
-        </td>
-      </tr>
+      <div class="andar-row" id="row-{{andar}}">
+        <div class="andar-nome">{{ nomes[andar] }}</div>
+        <div class="poco" id="poco-A-{{andar}}"></div>
+        <div class="poco" id="poco-B-{{andar}}"></div>
+      </div>
       {% endfor %}
-    </table>
+      <div class="cabine sem-anim" id="cab-A">🛗<small>A</small></div>
+      <div class="cabine sem-anim" id="cab-B">🛗<small>B</small></div>
+    </div>
+    <p id="anim-status"></p>
 
     <h2 style="margin-top:14px">📋 Fila de chamadas
         <span class="badge">{{ fila|length }}</span></h2>
@@ -253,6 +294,73 @@ PAGINA = """
 </main>
 <footer>Gincana Python SENAC — Equipe Eric · Diogo · Fabio · Yuri ·
         Mesma lógica do terminal, nova interface (modularização em ação)</footer>
+
+<script>
+  // Dados vindos do servidor
+  const NOMES = {{ nomes_js | tojson }};
+  const POSICOES = {{ posicoes_js | tojson }};   // posição atual {A: andar, B: andar}
+  const ANIM = {{ anim | tojson }};              // null ou {inicio:{...}, movimentos:[...]}
+
+  const status = document.getElementById('anim-status');
+
+  function setCabine(elev, andar, instantaneo) {
+    const cab = document.getElementById('cab-' + elev);
+    const celula = document.getElementById('poco-' + elev + '-' + andar);
+    if (!cab || !celula) return;
+    if (instantaneo) cab.classList.add('sem-anim');
+    cab.style.top = (celula.offsetTop + 3) + 'px';
+    cab.style.left = (celula.offsetLeft + 5) + 'px';
+    if (instantaneo) {
+      void cab.offsetHeight;             // força o navegador a aplicar já
+      cab.classList.remove('sem-anim');
+    }
+  }
+
+  function destacarAndar(andar, ligado) {
+    const row = document.getElementById('row-' + andar);
+    if (row) row.classList.toggle('ativo', ligado);
+  }
+
+  const pausa = (ms) => new Promise(r => setTimeout(r, ms));
+
+  async function reproduzirAnimacao() {
+    // Cabines começam onde estavam ANTES do processamento
+    for (const elev in ANIM.inicio) setCabine(elev, ANIM.inicio[elev], true);
+    await pausa(500);
+
+    for (const mv of ANIM.movimentos) {
+      const passo = mv.para > mv.de ? 1 : -1;
+      const verbo = passo > 0 ? '⬆️ subindo' : '⬇️ descendo';
+      status.textContent = `🛗 Elevador ${mv.elevador} ${verbo}: ` +
+                           `${NOMES[mv.de]} → ${NOMES[mv.para]}`;
+      let anterior = mv.de;
+      for (let andar = mv.de + passo; ; andar += passo) {
+        destacarAndar(anterior, false);
+        destacarAndar(andar, true);
+        setCabine(mv.elevador, andar, false);
+        await pausa(420);
+        anterior = andar;
+        if (andar === mv.para) break;
+      }
+      destacarAndar(anterior, false);
+      await pausa(300);   // portas abrindo/fechando
+    }
+    status.textContent = '✅ Movimentação concluída — confira o log abaixo.';
+  }
+
+  window.addEventListener('load', () => {
+    if (ANIM && ANIM.movimentos && ANIM.movimentos.length > 0) {
+      reproduzirAnimacao();
+    } else {
+      // Sem animação pendente: cabines na posição atual
+      for (const elev in POSICOES) setCabine(elev, POSICOES[elev], true);
+    }
+  });
+  // Reposiciona corretamente se a janela mudar de tamanho
+  window.addEventListener('resize', () => {
+    if (!ANIM) for (const elev in POSICOES) setCabine(elev, POSICOES[elev], true);
+  });
+</script>
 </body>
 </html>
 """
@@ -260,17 +368,17 @@ PAGINA = """
 
 @app.route("/")
 def pagina_inicial():
-    # Posição de cada elevador por andar, para desenhar o prédio
-    posicoes = {andar: [] for andar in ANDARES_VALIDOS}
-    for nome, elev in elevadores.items():
-        posicoes[elev["andar_atual"]].append(
-            {"nome": nome, "status": elev["status"]}
-        )
+    global animacao_pendente
+    anim = animacao_pendente
+    animacao_pendente = None  # a animação toca uma vez; F5 mostra o estado final
+
     return render_template_string(
         PAGINA,
         andares=sorted(ANDARES_VALIDOS, reverse=True),  # 4º no topo
         nomes=NOMES_ANDARES,
-        posicoes=posicoes,
+        nomes_js={str(a): NOMES_ANDARES[a] for a in ANDARES_VALIDOS},
+        posicoes_js={n: e["andar_atual"] for n, e in elevadores.items()},
+        anim=anim,
         fila=fila_chamadas,
         usuarios=cadastro.USUARIOS,
         icones=ICONES_PERFIL,
@@ -311,8 +419,6 @@ def rota_manual():
     nome = request.form.get("nome", "").strip() or "Visitante"
     origem = int(request.form.get("origem"))
     destino = int(request.form.get("destino"))
-    # Regra 5 (Validar Entradas) — selects já limitam aos andares
-    # válidos; aqui validamos a regra de negócio origem != destino
     if origem == destino:
         ultimo_log = "❌ Origem e destino são iguais — escolha andares diferentes."
     else:
@@ -335,10 +441,20 @@ def rota_simular():
 
 @app.route("/processar", methods=["POST"])
 def rota_processar():
-    global ultimo_log
+    global ultimo_log, animacao_pendente
+    # Fotografa onde as cabines estão ANTES e zera o gravador
+    posicoes_iniciais = {n: e["andar_atual"] for n, e in elevadores.items()}
+    movimentos_registrados.clear()
+
     ultimo_log = capturar_saida(
         chamadas.processar_fila, fila_chamadas, elevadores, caos_ativo
     )
+
+    if movimentos_registrados:
+        animacao_pendente = {
+            "inicio": posicoes_iniciais,
+            "movimentos": list(movimentos_registrados),
+        }
     return redirect(url_for("pagina_inicial"))
 
 
@@ -361,10 +477,11 @@ def rota_relatorio():
 @app.route("/reiniciar", methods=["POST"])
 def rota_reiniciar():
     """Volta ao estado inicial — útil para ensaiar a demo várias vezes."""
-    global elevadores, fila_chamadas, caos_ativo, ultimo_log
+    global elevadores, fila_chamadas, caos_ativo, ultimo_log, animacao_pendente
     elevadores = mod_elevadores.criar_elevadores()
     fila_chamadas = []
     caos_ativo = False
+    animacao_pendente = None
     ultimo_log = "🔄 Demo reiniciada. Elevador A no Térreo, B no 4º andar."
     return redirect(url_for("pagina_inicial"))
 
